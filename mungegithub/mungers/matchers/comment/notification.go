@@ -75,3 +75,8 @@ func (n *Notification) String() string {
 func (n Notification) Post(obj *mgh.MungeObject) error {
 	return obj.WriteComment(n.String())
 }
+
+// Equal compares this notification to the given notification for equivalence
+func (n *Notification) Equal(o *Notification) bool {
+	return (o != nil && n.Name == o.Name && n.Arguments == o.Arguments && n.Context == o.Context)
+}
