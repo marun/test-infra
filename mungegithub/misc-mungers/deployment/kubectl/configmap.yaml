@@ -17,4 +17,4 @@ milestone-label-grace-period: 5m
 milestone-approval-grace-period: 5m
 milestone-slush-update-interval: 2m
 milestone-freeze-update-interval: 2m
-freeze-date: the time heck freezes over
+milestone-freeze-date: the time heck freezes over
