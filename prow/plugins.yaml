@@ -60,6 +60,12 @@ slack:
     whitelist:
     - k8s-merge-robot
 
+milestonemaintainer:
+  modes:
+    v1.8: dev
+    v1.9: dev
+  freeze_date: TBD
+
 milestonestatus:
   # You can curl the following endpoint in order to determine the github ID of your team
   # responsible for maintaining the milestones:

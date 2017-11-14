@@ -266,6 +266,18 @@ type Heart struct {
 	Adorees []string `json:"adorees,omitempty"`
 }
 
+// MilestoneMaintainer contains the configuration options for the
+// milestonemaintainer plugin.
+type MilestoneMaintainer struct {
+	Modes                map[string]string `json:"modes"`
+	WarningInterval      time.Duration     `json:"warning_interval,omitempty"`
+	LabelGracePeriod     time.Duration     `json:"label_grace_period,omitempty"`
+	ApprovalGracePeriod  time.Duration     `json:"approval_grace_period,omitempty"`
+	SlushUpdateInterval  time.Duration     `json:"slush_update_interval,omitempty"`
+	FreezeUpdateInterval time.Duration     `json:"freeze_update_interval,omitempty"`
+	FreezeDate           string            `json:"freeze_date"`
+}
+
 // MilestoneStatus contains the configuration options for the milestonestatus plugin.
 type MilestoneStatus struct {
 	// ID of the github team for the milestone maintainers (used for setting status labels)
