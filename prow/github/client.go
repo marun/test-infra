@@ -1197,3 +1197,22 @@ func (c *Client) ListIssueEvents(org, repo string, num int) ([]ListedIssueEvent,
 	}
 	return events, nil
 }
+
+// ClearMilestone clears the milestone from the specified issue
+func (c *Client) ClearMilestone(org, repo string, num int) error {
+	c.log("ClearMilestone", org, repo, num)
+	if c.fake {
+		return nil
+	}
+
+	issue := &struct {
+		Milestone interface{} `json:"milestone"`
+	}{}
+	_, err := c.request(&request{
+		method:      http.MethodPatch,
+		path:        fmt.Sprintf("%s/repos/%v/%v/issues/%d", c.base, org, repo, num),
+		requestBody: &issue,
+		exitCodes:   []int{200},
+	}, nil)
+	return err
+}

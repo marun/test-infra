@@ -17,6 +17,7 @@ limitations under the License.
 package github
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -38,6 +39,10 @@ const (
 	ReactionHeart                     = "heart"
 	ReactionHooray                    = "hooray"
 	stateCannotBeChangedMessagePrefix = "state cannot be changed."
+)
+
+var (
+	ReleaseMilestoneRE = regexp.MustCompile(`^v[\d]+.[\d]$`)
 )
 
 // ClientError represents https://developer.github.com/v3/#client-errors
@@ -227,17 +232,17 @@ type IssueCommentEvent struct {
 }
 
 type Issue struct {
-	User      User       `json:"user"`
-	Number    int        `json:"number"`
-	Title     string     `json:"title"`
-	State     string     `json:"state"`
-	HTMLURL   string     `json:"html_url"`
-	Labels    []Label    `json:"labels"`
-	Assignees []User     `json:"assignees"`
-	Body      string     `json:"body"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	Milestone *Milestone `json:"milestone,omitempty"`
+	User      User      `json:"user"`
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	State     string    `json:"state"`
+	HTMLURL   string    `json:"html_url"`
+	Labels    []Label   `json:"labels"`
+	Assignees []User    `json:"assignees"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Milestone Milestone `json:"milestone"`
 
 	// This will be non-nil if it is a pull request.
 	PullRequest *struct{} `json:"pull_request,omitempty"`
@@ -469,4 +474,14 @@ type GenericCommentEvent struct {
 // Milestone is a milestone defined on a github repository
 type Milestone struct {
 	Title string `json:"title"`
+}
+
+// ReleaseMilestone returns the name of the 'release' milestone or an
+// empty string if none found. Release milestones are determined by
+// the format "vX.Y"
+func (m Milestone) ReleaseMilestone() string {
+	if ReleaseMilestoneRE.MatchString(m.Title) {
+		return m.Title
+	}
+	return ""
 }

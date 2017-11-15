@@ -21,6 +21,7 @@ filegroup(
         "//prow/cmd/hook:all-srcs",
         "//prow/cmd/horologium:all-srcs",
         "//prow/cmd/jenkins-operator:all-srcs",
+        "//prow/cmd/milestone-maintainer:all-srcs",
         "//prow/cmd/mkpj:all-srcs",
         "//prow/cmd/phony:all-srcs",
         "//prow/cmd/plank:all-srcs",

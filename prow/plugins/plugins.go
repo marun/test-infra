@@ -17,6 +17,7 @@ limitations under the License.
 package plugins
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"strings"
@@ -153,13 +154,14 @@ type Configuration struct {
 	Owners Owners `json:"owners,omitempty"`
 
 	// Built-in plugins specific configuration.
-	Triggers        []Trigger       `json:"triggers,omitempty"`
-	Heart           Heart           `json:"heart,omitempty"`
-	MilestoneStatus MilestoneStatus `json:"milestonestatus,omitempty"`
-	Slack           Slack           `json:"slack,omitempty"`
-	ConfigUpdater   ConfigUpdater   `json:"config_updater,omitempty"`
-	Blockades       []Blockade      `json:"blockades,omitempty"`
-	Approve         []Approve       `json:"approve,omitempty"`
+	Triggers            []Trigger           `json:"triggers,omitempty"`
+	Heart               Heart               `json:"heart,omitempty"`
+	MilestoneStatus     MilestoneStatus     `json:"milestonestatus,omitempty"`
+	MilestoneMaintainer MilestoneMaintainer `json:"milestone_maintainer,omitempty"`
+	Slack               Slack               `json:"slack,omitempty"`
+	ConfigUpdater       ConfigUpdater       `json:"config_updater,omitempty"`
+	Blockades           []Blockade          `json:"blockades,omitempty"`
+	Approve             []Approve           `json:"approve,omitempty"`
 }
 
 // ExternalPlugin holds configuration for registering an external
@@ -269,13 +271,69 @@ type Heart struct {
 // MilestoneMaintainer contains the configuration options for the
 // milestonemaintainer plugin.
 type MilestoneMaintainer struct {
-	Modes                map[string]string `json:"modes"`
-	WarningInterval      time.Duration     `json:"warning_interval,omitempty"`
-	LabelGracePeriod     time.Duration     `json:"label_grace_period,omitempty"`
-	ApprovalGracePeriod  time.Duration     `json:"approval_grace_period,omitempty"`
-	SlushUpdateInterval  time.Duration     `json:"slush_update_interval,omitempty"`
-	FreezeUpdateInterval time.Duration     `json:"freeze_update_interval,omitempty"`
-	FreezeDate           string            `json:"freeze_date"`
+	// The mapping of milestones to the modes to maintain them in, e.g.
+	//
+	// milestonemaintainer:
+	//   modes:
+	//     v1.8: dev
+	//     v1.9: slush
+	//
+	Modes map[string]string `json:"modes"`
+	// The interval to wait between warning about an incomplete issue
+	// in the active milestone.
+	WarningInterval time.Duration `json:"warning_interval"`
+	// The grace period to wait before removing a non-blocking issue
+	// with incomplete labels from the active milestone.
+	LabelGracePeriod time.Duration `json:"label_grace_period"`
+	// The grace period to wait before removing a non-blocking issue
+	// without sig approval from the active milestone.
+	ApprovalGracePeriod time.Duration `json:"approval_grace_period"`
+	// The expected interval, during code slush, between updates to a
+	// blocking issue in the active milestone.
+	SlushUpdateInterval time.Duration `json:"slush_update_interval"`
+	// The expected interval, during code freeze, between updates to a
+	// blocking issue in the active milestone.
+	FreezeUpdateInterval time.Duration `json:"freeze_update_interval"`
+	// Slush mode requires a freeze date to include in notifications
+	// indicating the date by which non-critical issues must be closed
+	// or upgraded in priority to avoid being moved out of the
+	// milestone.  Only a single freeze date can be set under the
+	// assumption that, where multiple milestones are targeted, only
+	// one at a time will be in slush mode.
+	FreezeDate string `json:"freeze_date"`
+
+	validated bool
+}
+
+func (m *MilestoneMaintainer) Validate() error {
+	// Avoid validating more than once
+	if m.validated {
+		return nil
+	}
+	m.validated = true
+
+	if len(m.Modes) < 1 {
+		return errors.New("MilestoneMaintainer.Modes must be configured with one or more milestones")
+	}
+
+	durationConfig := map[string]time.Duration{
+		"WarningInterval":     m.WarningInterval,
+		"LabelGracePeriod":    m.LabelGracePeriod,
+		"ApprovalGracePeriod": m.ApprovalGracePeriod,
+		"SlushUpdateInterval": m.SlushUpdateInterval,
+		"FrezeUpdateInterval": m.FreezeUpdateInterval,
+	}
+	for name, value := range durationConfig {
+		if value <= 0 {
+			return fmt.Errorf("MilestoneMaintainer.%s must be greater than zero", name)
+		}
+	}
+
+	if len(m.FreezeDate) == 0 {
+		return errors.New("MilestoneMaintainer.FreezeDate must be supplied")
+	}
+
+	return nil
 }
 
 // MilestoneStatus contains the configuration options for the milestonestatus plugin.

@@ -60,6 +60,7 @@ filegroup(
         "//prow/plugins/hold:all-srcs",
         "//prow/plugins/label:all-srcs",
         "//prow/plugins/lgtm:all-srcs",
+        "//prow/plugins/milestonemaintainer:all-srcs",
         "//prow/plugins/milestonestatus:all-srcs",
         "//prow/plugins/releasenote:all-srcs",
         "//prow/plugins/reopen:all-srcs",

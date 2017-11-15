@@ -63,7 +63,12 @@ slack:
 milestonemaintainer:
   modes:
     v1.8: dev
-    v1.9: dev
+    v1.9: slush
+  warning_interval: 24h
+  label_grace_period: 72h
+  approval_grace_period: 168h
+  slush_update_interrval: 72h
+  freeze_update_interval: 24h
   freeze_date: TBD
 
 milestonestatus:
