@@ -211,37 +211,61 @@ type githubClient interface {
 
 // issueChange encapsulates changes to make to an issue.
 type issueChange struct {
-	// TODO replace notification?
 	notification        *Notification
 	label               string
 	commentInterval     *time.Duration
 	removeFromMilestone bool
 }
 
-type milestoneMaintainer struct {
+// milestoneMaintainer configures the maintenance of an issue or pr in
+// a targeted milestone.
+type MilestoneMaintainer struct {
 	plugins.MilestoneMaintainer
-	gc        githubClient
-	log       *logrus.Entry
-	milestone string
-	mode      string
+
+	gc  githubClient
+	log *logrus.Entry
 }
 
-// Issue events to care about during dev
-//   - labeled / unlabeled
-//   - milestoned / demilestoned
-//   - opened / reopened
-// Issue events to care about during slush / freeze
-//   - all?
+type targetConfig struct {
+	milestone string
+	mode      string
+	org       string
+	repo      string
+	issue     github.Issue
+}
 
-func HandleIssue(gc githubClient, log *logrus.Entry, config plugins.MilestoneMaintainer, e github.IssueEvent) error {
+func init() {
+	plugins.RegisterIssueHandler(pluginName, handleIssueEvent, nil)
+}
+
+// how to handle update detection
+// - issues, issue_comment, pull_request, pull_request_review, pull_request_review_comment, push, status
+
+func handleIssueEvent(pc PluginClient, e github.IssueEvent) error {
+	maintainer := milestoneMaintainer{
+		MilestoneMaintainer: config,
+		gc:                  gc,
+		log:                 log,
+	}
+	maintainer.HandleIssue(e.Repo.Owner.Name, e.Repo.Name, e.Issue)
+}
+
+func (m *MilestoneMaintainer) HandleIssue(org, repo string, issue github.Issue) error {
+	// Ignore pull requests
+	// TODO support pull requests
+	if issue.IsPullRequest() {
+		log.Debug("Ignoring pull request")
+		return nil
+	}
+
 	// Ignore closed issues
-	if e.Issue.State == "closed" {
+	if issue.State == "closed" {
 		log.Debug("Ignoring closed issue")
 		return nil
 	}
 
 	// Ignore issues without a release milestone
-	milestone := e.Issue.Milestone.ReleaseMilestone()
+	milestone := issue.Milestone.ReleaseMilestone()
 	if len(milestone) == 0 {
 		log.Debug("Ignoring issue without a release milestone")
 		return nil
@@ -261,40 +285,19 @@ func HandleIssue(gc githubClient, log *logrus.Entry, config plugins.MilestoneMai
 
 	log.Debug("Maintaining issue")
 
-	m := &milestoneMaintainer{
-		MilestoneMaintainer: config,
-		gc:                  gc,
-		log:                 log,
-		milestone:           milestone,
-		mode:                mode,
+	target := targetConfig{
+		milestone: milestone,
+		mode:      mode,
+		org:       org,
+		repo:      repo,
+		issue:     issue,
 	}
-	return m.maintainIssue(e)
+	return m.maintain(target)
 }
 
-// milestoneMode determines the release milestone and mode for the
-// provided issue.  If a milestone is set and one of those targeted by
-// the plugin, the milestone and mode will be returned along with a
-// boolean indication of success.  Otherwise, if the milestone is not
-// set or not targeted, a boolean indication of failure will be
-// returned.
-// func milestoneMode(config plugins.MilestoneMaintainer, issue github.Issue) (milestone string, mode string, success bool) {
-// 	// Ignore issues that lack a released milestone
-// 	milestone := issue.ReleaseMilestone()
-// 	if len(milestone) == 0 {
-// 		return "", "", false
-// 	}
-
-// 	// Ignore issues that aren't in a targeted milestone
-// 	mode, exists := config.Modes[milestone]
-// 	if !exists {
-// 		return "", "", false
-// 	}
-// 	return milestone, mode, true
-// }
-
 // maintainIssue is the workhorse the will actually make updates to the issue
-func (m *milestoneMaintainer) maintainIssue(e github.IssueEvent) error {
-	change, err := m.issueChange(e)
+func (m *milestoneMaintainer) maintain(target targetConfig) error {
+	change, err := m.issueChange()
 	if err != nil {
 		return err
 	}
@@ -302,11 +305,11 @@ func (m *milestoneMaintainer) maintainIssue(e github.IssueEvent) error {
 		return nil
 	}
 
-	if err := updateMilestoneStateLabel(m.gc, e, change.label); err != nil {
+	if err := updateMilestoneStateLabel(m.gc, m.issue, m.repo, change.label); err != nil {
 		return err
 	}
 
-	comment, notification, err := notificationComment(m.gc, e, m.log)
+	comment, notification, err := notificationComment(m.log, m.gc, m.repo, m.issue)
 	if err != nil {
 		return err
 	}
@@ -337,8 +340,8 @@ func (m *milestoneMaintainer) maintainIssue(e github.IssueEvent) error {
 // issueChange computes the changes required to modify the state of
 // the issue to reflect the milestone process. If a nil return value
 // is returned, no action should be taken.
-func (m *milestoneMaintainer) issueChange(e github.IssueEvent) (*issueChange, error) {
-	icc, err := m.issueChangeConfig(e)
+func (m *milestoneMaintainer) issueChange() (*issueChange, error) {
+	icc, err := m.issueChangeConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -353,15 +356,20 @@ func (m *milestoneMaintainer) issueChange(e github.IssueEvent) (*issueChange, er
 
 	stateConfig := milestoneStateConfigs[icc.state]
 
-	// TODO
-	mentions := ""
-	// mentions := target.mentions()
-	// if stateConfig.notifySIGs {
-	// 	sigMentions := icc.sigMentions()
-	// 	if len(sigMentions) > 0 {
-	// 		mentions = fmt.Sprintf("%s %s", mentions, sigMentions)
-	// 	}
-	// }
+	mentionLogins := []string{
+		fmt.Sprintf("@%s", e.Issue.User.Login),
+	}
+	for _, assignee := range e.Issue.Assignees {
+		mentionLogins = append(mentionLogins, fmt.Sprintf("@%s", assignee.Login))
+	}
+	mentions := strings.Join(mentionLogins, " ")
+
+	if stateConfig.notifySIGs {
+		sigMentions := icc.sigMentions()
+		if len(sigMentions) > 0 {
+			mentions = fmt.Sprintf("%s %s", mentions, sigMentions)
+		}
+	}
 
 	message := fmt.Sprintf("%s\n\n%s\n%s", mentions, *messageBody, milestoneDetail)
 
@@ -388,8 +396,7 @@ func (m *milestoneMaintainer) issueChange(e github.IssueEvent) (*issueChange, er
 func (m *milestoneMaintainer) issueChangeConfig(e github.IssueEvent) (*issueChangeConfig, error) {
 	updateInterval := m.updateInterval()
 
-	// TODO objTypeString(obj)
-	objType := "issue"
+	objType := objTypeString(issue)
 
 	icc := &issueChangeConfig{
 		enabledSections: sets.String{},
@@ -447,21 +454,24 @@ func (m *milestoneMaintainer) issueChangeConfig(e github.IssueEvent) (*issueChan
 			icc.warnMissingInProgress()
 		}
 
-		// TODO
-		// if !isBlocker {
-		// 	icc.enableSection("warnNonBlockerRemoval")
-		// } else if updateInterval > 0 {
-		// 	lastUpdateTime, ok := findLastModificationTime(obj)
-		// 	if !ok {
-		// 		return nil
-		// 	}
+		if !isBlocker {
+			icc.enableSection("warnNonBlockerRemoval")
+		} else if updateInterval > 0 {
+			obj := githubObject{
+				// TODO
+				id: issue.Number,
+			}
+			lastUpdateTime, err := lastModificationTime(m.gc, obj)
+			if err != nil {
+				return nil, err
+			}
 
-		// 	durationSinceUpdate := time.Since(*lastUpdateTime)
-		// 	if durationSinceUpdate > updateInterval {
-		// 		icc.warnUpdateRequired(*lastUpdateTime)
-		// 	}
-		// 	icc.enableSection("warnUpdateInterval")
-		// }
+			durationSinceUpdate := time.Since(*lastUpdateTime)
+			if durationSinceUpdate > updateInterval {
+				icc.warnUpdateRequired(*lastUpdateTime)
+			}
+			icc.enableSection("warnUpdateInterval")
+		}
 	} else {
 		removeAfter, err := gracePeriodRemaining(m.gc, e, milestoneLabelsIncompleteLabel, m.LabelGracePeriod, time.Now(), isBlocker)
 		if err != nil {
@@ -608,8 +618,8 @@ func (icc *issueChangeConfig) sigMentions() string {
 //
 // Since the plugin is careful to remove existing comments before
 // adding new ones, only a single notification comment should exist.
-func notificationComment(gc githubClient, e github.IssueEvent, log *logrus.Entry) (*github.IssueComment, *Notification, error) {
-	comments, err := gc.ListIssueComments(e.Repo.Owner.Name, e.Repo.Name, e.Issue.Number)
+func notificationComment(log *logrus.Entry, gc githubClient, repo github.Repo, issue github.Issue) (*github.IssueComment, *Notification, error) {
+	comments, err := gc.ListIssueComments(repo.Owner.Name, repo.Name, e.Issue.Number)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -628,7 +638,9 @@ func notificationComment(gc githubClient, e github.IssueEvent, log *logrus.Entry
 			continue
 		}
 
-		// Only one comment will ever exist for the notifier
+		// Only one comment will ever exist for the notifier since an
+		// existing comment is always deleted before a new one is
+		// added.
 		if strings.ToUpper(notif.Name) == strings.ToUpper(milestoneNotifierName) {
 			return &comment, notif, nil
 		}
@@ -681,8 +693,8 @@ func gracePeriodStart(gc githubClient, e github.IssueEvent, labelName string, de
 // labelLastCreatedAt returns the time at which the given label was
 // last applied to the given issue. Returns nil if an error occurs
 // during event retrieval or if the label has never been set.
-func labelLastCreatedAt(gc githubClient, e github.IssueEvent, labelName string) (*time.Time, error) {
-	events, err := gc.ListIssueEvents(e.Repo.Owner.Name, e.Repo.Name, e.Issue.Number)
+func labelLastCreatedAt(gc githubClient, repo github.Repo, issue github.Issue, labelName string) (*time.Time, error) {
+	events, err := gc.ListIssueEvents(repo.Owner.Name, repo.Name, e.Issue.Number)
 	if err != nil {
 		return nil, err
 	}
@@ -791,17 +803,17 @@ func quoteLabel(label string) string {
 
 // updateMilestoneStateLabel ensures that the given milestone state
 // label is the only state label set on the given issue.
-func updateMilestoneStateLabel(gc githubClient, e github.IssueEvent, labelName string) error {
-	org := e.Repo.Owner.Name
-	repo := e.Repo.Name
-	num := e.Issue.Number
-	if len(labelName) > 0 && !e.Issue.HasLabel(labelName) {
+func updateMilestoneStateLabel(gc githubClient, repo github.Repo, issue github.Issue, labelName string) error {
+	org := repo.Owner.Name
+	repo := repo.Name
+	num := issue.Number
+	if len(labelName) > 0 && !issue.HasLabel(labelName) {
 		if err := gc.AddLabel(org, repo, num, labelName); err != nil {
 			return fmt.Errorf("error adding label %s to %s/%s #%d: %v", labelName, org, repo, num, err)
 		}
 	}
 	for _, stateLabel := range milestoneStateLabels {
-		if stateLabel != labelName && e.Issue.HasLabel(stateLabel) {
+		if stateLabel != labelName && issue.HasLabel(stateLabel) {
 			if err := gc.RemoveLabel(org, repo, num, stateLabel); err != nil {
 				return fmt.Errorf("error removing label %s from %s/%s #%d: %v", labelName, org, repo, num, err)
 			}
